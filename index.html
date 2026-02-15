@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpinCare — Wound Healing Game</title>
+    <meta name="description" content="Cover the wound with nanofiber! An interactive game simulating SpinCare electrospinning wound care.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Intro Screen -->
+    <div id="intro-screen">
+        <div class="intro-content">
+            <div class="intro-icon">
+                <svg viewBox="0 0 80 80" width="80" height="80">
+                    <rect x="28" y="6" width="24" height="68" rx="6" fill="#0891b2" opacity="0.3"/>
+                    <rect x="6" y="28" width="68" height="24" rx="6" fill="#0891b2" opacity="0.3"/>
+                    <rect x="30" y="8" width="20" height="64" rx="5" fill="#0891b2"/>
+                    <rect x="8" y="30" width="64" height="20" rx="5" fill="#0891b2"/>
+                </svg>
+            </div>
+            <h1 class="intro-title">SpinCare</h1>
+            <p class="intro-subtitle">Wound Healing Simulation</p>
+            <div class="intro-instructions">
+                <div class="instruction-item">
+                    <span class="instruction-icon">🖱️</span>
+                    <span>Move mouse to aim the SpinCare device</span>
+                </div>
+                <div class="instruction-item">
+                    <span class="instruction-icon">🖱️</span>
+                    <span><strong>Hold click</strong> to spray nanofibers</span>
+                </div>
+                <div class="instruction-item">
+                    <span class="instruction-icon">🎯</span>
+                    <span>Cover the wound <strong>100%</strong> to complete!</span>
+                </div>
+            </div>
+            <button id="btn-play" class="play-btn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start Healing
+            </button>
+            <p class="intro-note">Educational simulation of electrospinning wound care</p>
+        </div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud" style="display:none;">
+        <!-- Top HUD Bar -->
+        <div class="hud-top">
+            <div class="hud-brand">
+                <svg viewBox="0 0 28 28" width="20" height="20">
+                    <rect x="10" y="2" width="8" height="24" rx="2" fill="#0891b2"/>
+                    <rect x="2" y="10" width="24" height="8" rx="2" fill="#0891b2"/>
+                </svg>
+                <span>SpinCare</span>
+            </div>
+            <div class="hud-info-btn">
+                <button id="btn-info" class="hud-btn" title="Info">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                </button>
+                <button id="btn-reset" class="hud-btn" title="Restart">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Coverage Bar (Big, Game-style) -->
+        <div class="hud-coverage">
+            <div class="coverage-label">WOUND COVERAGE</div>
+            <div class="coverage-bar-outer">
+                <div class="coverage-bar-fill" id="coverage-fill"></div>
+                <div class="coverage-bar-glow" id="coverage-glow"></div>
+            </div>
+            <div class="coverage-pct" id="coverage-text">0%</div>
+        </div>
+
+        <!-- Bottom HUD -->
+        <div class="hud-bottom">
+            <!-- Polymer Quick Select -->
+            <div class="hud-polymers">
+                <button class="hud-poly active" data-polymer="PCL" data-color="#0891b2">
+                    <span class="poly-swatch" style="background:#0891b2"></span>PCL
+                </button>
+                <button class="hud-poly" data-polymer="PVA" data-color="#7c3aed">
+                    <span class="poly-swatch" style="background:#7c3aed"></span>PVA
+                </button>
+                <button class="hud-poly" data-polymer="PLGA" data-color="#059669">
+                    <span class="poly-swatch" style="background:#059669"></span>PLGA
+                </button>
+                <button class="hud-poly" data-polymer="Chitosan" data-color="#d97706">
+                    <span class="poly-swatch" style="background:#d97706"></span>Chitosan
+                </button>
+            </div>
+
+            <!-- Power Slider -->
+            <div class="hud-power">
+                <span class="power-label">POWER</span>
+                <input type="range" id="power-slider" class="power-range" min="1" max="5" value="3" step="1">
+                <span class="power-value" id="power-value">3</span>
+            </div>
+
+            <!-- Timer -->
+            <div class="hud-timer">
+                <span class="timer-icon">⏱️</span>
+                <span id="timer-text">00:00</span>
+            </div>
+        </div>
+
+        <!-- Spray Indicator (crosshair area) -->
+        <div class="spray-indicator" id="spray-indicator">
+            <div class="spray-ring"></div>
+            <div class="spray-ring-inner"></div>
+            <div class="spray-dot"></div>
+        </div>
+    </div>
+
+    <!-- Win Screen -->
+    <div id="win-screen" style="display:none;">
+        <div class="win-content">
+            <div class="win-icon">🎉</div>
+            <h2 class="win-title">Wound Healed!</h2>
+            <p class="win-subtitle">The nanofiber dressing is complete</p>
+            <div class="win-stats">
+                <div class="win-stat">
+                    <span class="win-stat-value" id="win-time">00:00</span>
+                    <span class="win-stat-label">Time</span>
+                </div>
+                <div class="win-stat">
+                    <span class="win-stat-value" id="win-fibers">0</span>
+                    <span class="win-stat-label">Fibers</span>
+                </div>
+            </div>
+            <button id="btn-replay" class="play-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Play Again
+            </button>
+        </div>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="info-modal" style="display:none;">
+        <div class="info-box">
+            <button id="close-modal" class="close-btn">✕</button>
+            <h2>How SpinCare Works</h2>
+            <p>SpinCare is a real medical device that uses <strong>electrospinning</strong> to create nanofiber wound dressings. A high-voltage electric field stretches a polymer solution into ultra-fine fibers (50-500nm) that land on the wound, forming a breathable protective layer.</p>
+            <h3>In This Simulation</h3>
+            <p>Move your mouse to aim the device. Hold click to spray nanofibers onto the wound. Cover 100% to complete the dressing!</p>
+            <p><strong>Power slider:</strong> Higher power = wider spray but less precision.<br><strong>Polymer:</strong> Changes the fiber color and properties.</p>
+        </div>
+    </div>
+
+    <!-- Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- Custom Cursor -->
+    <div id="custom-cursor" style="display:none;">
+        <svg width="40" height="40" viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(8,145,178,0.4)" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <circle cx="20" cy="20" r="3" fill="#0891b2"/>
+            <line x1="20" y1="6" x2="20" y2="14" stroke="rgba(8,145,178,0.5)" stroke-width="1"/>
+            <line x1="20" y1="26" x2="20" y2="34" stroke="rgba(8,145,178,0.5)" stroke-width="1"/>
+            <line x1="6" y1="20" x2="14" y2="20" stroke="rgba(8,145,178,0.5)" stroke-width="1"/>
+            <line x1="26" y1="20" x2="34" y2="20" stroke="rgba(8,145,178,0.5)" stroke-width="1"/>
+        </svg>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
