@@ -11,7 +11,10 @@ const G = {
     isSpraying: false,
     coverage: 0,
     totalFibers: 0,
-    power: 3,           // 1-5
+    // ── Electrospinning parameters ──
+    voltage: 15,        // kV (5–25)
+    distance: 10,       // cm (5–20)
+    flowRate: 2.0,      // mL/h (0.5–5.0)
     polymer: 'PCL',
     startTime: 0,
     elapsed: 0,
@@ -22,6 +25,55 @@ const G = {
     mouseNDC: new THREE.Vector2(0, 0),
     hasAim: false,       // true when mouse is over the wound area
 };
+
+// ─── Physics Model ───────────────────────────────────────────────────
+// Derives simulation values from real electrospinning parameters
+function calcSprayPhysics() {
+    const V = G.voltage;  // kV
+    const D = G.distance; // cm
+    const F = G.flowRate; // mL/h
+
+    // Fiber diameter (nm): higher voltage → thinner, higher flow → thicker
+    // Realistic range: ~100–800nm
+    const fiberDiameter = Math.max(80, 600 - V * 20 + F * 40);
+
+    // Spray radius (world units): increases with distance, slightly with voltage
+    const sprayRadius = 0.2 + D * 0.06 + V * 0.008;
+
+    // Accumulation rate: proportional to flow rate, inversely to spray area
+    const area = Math.PI * sprayRadius * sprayRadius;
+    const accumulationRate = (F * 1.8) / Math.max(0.5, area * 0.5);
+
+    // Particle speed: proportional to voltage (electric field strength)
+    const particleSpeed = 4 + V * 0.6;
+
+    // Particle spread: higher distance = more spread
+    const particleSpread = 0.1 + D * 0.02;
+
+    // Emission count per frame: proportional to flow rate
+    const emissionRate = F * 8;
+
+    // Gaussian sigma: wider at higher distance
+    const gaussianSigma = 0.7 + D * 0.015;
+
+    // Visual fiber length: thicker fibers = shorter, thinner = longer
+    const fiberLength = 0.1 + (fiberDiameter / 800) * 0.4;
+
+    // Particle visual size: thicker fibers = larger particles
+    const particleSize = 1.0 + (fiberDiameter / 400);
+
+    return {
+        fiberDiameter,   // nm
+        sprayRadius,     // world units
+        accumulationRate,// coverage per second
+        particleSpeed,   // world units / sec
+        particleSpread,  // spread factor
+        emissionRate,    // particles per frame
+        gaussianSigma,   // 0-1 fraction of radius
+        fiberLength,     // world units
+        particleSize,    // point size
+    };
+}
 
 const POLYMERS = {
     PCL: { hex: 0x0891b2, css: '#0891b2', fiber: 'rgba(8,145,178,' },
@@ -184,15 +236,20 @@ function worldToGrid(wx, wz) {
 let _lastOverlayUpdate = 0;
 
 function sprayAtAim(worldX, worldZ, worldRadius, dt) {
+    const phys = calcSprayPhysics();
     const { gx, gy } = worldToGrid(worldX, worldZ);
     const gridRadius = worldRadius / CELL_SIZE;
     const r = Math.ceil(gridRadius);
-    const sigma = gridRadius * 0.85;  // wider spread so edges accumulate properly
+    const sigma = gridRadius * phys.gaussianSigma;
     const sigma2 = sigma * sigma;
-    const rate = G.power * 1.5 * dt;  // faster accumulation to match visual
+    const rate = phys.accumulationRate * dt;
 
-    const s = 512;
-    const cellPx = s / W_GRID;
+    const s = 1024;
+    // Wound grid occupies center portion of the unified canvas
+    const woundFrac = WOUND_WORLD / SURFACE_RADIUS;
+    const woundPx = s * woundFrac;
+    const woundOff = (s - woundPx) / 2;
+    const cellPx = woundPx / W_GRID;
     const poly = POLYMERS[G.polymer];
     let changed = false;
 
@@ -202,23 +259,86 @@ function sprayAtAim(worldX, worldZ, worldRadius, dt) {
             if (dist2 > gridRadius * gridRadius) continue;
             const nx = Math.round(gx + dx);
             const ny = Math.round(gy + dy);
-            if (!isWoundCell(nx, ny)) continue;
+            if (nx < 0 || nx >= W_GRID || ny < 0 || ny >= W_GRID) continue;
+
+            const isWound = isWoundCell(nx, ny);
             const idx = ny * W_GRID + nx;
-            if (coverageGrid[idx] >= 1.0) continue;
 
-            const falloff = Math.exp(-dist2 / (2 * sigma2));
-            const add = rate * falloff * (0.8 + Math.random() * 0.4);
-            const prev = coverageGrid[idx];
-            coverageGrid[idx] = Math.min(1.0, prev + add);
+            if (isWound) {
+                // Wound cell: track coverage + draw fibers
+                if (coverageGrid[idx] >= 1.0) continue;
+                const falloff = Math.exp(-dist2 / (2 * sigma2));
+                const add = rate * falloff * (0.8 + Math.random() * 0.4);
+                const prev = coverageGrid[idx];
+                coverageGrid[idx] = Math.min(1.0, prev + add);
 
-            if (coverageGrid[idx] !== prev) {
+                if (coverageGrid[idx] !== prev) {
+                    changed = true;
+                    const px = woundOff + (nx + 0.5) * cellPx;
+                    const py = woundOff + (ny + 0.5) * cellPx;
+
+                    // Solid coverage tint — shows actual counted coverage area
+                    const tintAlpha = Math.min(0.35, coverageGrid[idx] * 0.3);
+                    woundCtx.fillStyle = poly.fiber + tintAlpha + ')';
+                    woundCtx.fillRect(px - cellPx * 0.5, py - cellPx * 0.5, cellPx, cellPx);
+
+                    // Fiber strands — proportional to cell size
+                    const strands = 1 + Math.floor(Math.random() * 3);
+                    for (let fi = 0; fi < strands; fi++) {
+                        const fAngle = Math.random() * Math.PI * 2;
+                        const fLen = cellPx * (1 + Math.random() * 4);
+                        const ex = px + Math.cos(fAngle) * fLen;
+                        const ey = py + Math.sin(fAngle) * fLen;
+                        const alpha = Math.min(0.5, coverageGrid[idx] * 0.35 + 0.08);
+                        woundCtx.strokeStyle = poly.fiber + alpha + ')';
+                        woundCtx.lineWidth = 0.3 + Math.random() * 1.0;
+                        woundCtx.beginPath();
+                        woundCtx.moveTo(px + (Math.random() - 0.5) * 2, py + (Math.random() - 0.5) * 2);
+                        woundCtx.quadraticCurveTo(
+                            (px + ex) / 2 + (Math.random() - 0.5) * cellPx * 2,
+                            (py + ey) / 2 + (Math.random() - 0.5) * cellPx * 2,
+                            ex, ey
+                        );
+                        woundCtx.stroke();
+                    }
+                }
+            } else {
+                // Skin cell near wound: visual-only fiber overflow (no coverage)
+                let nearWound = false;
+                for (let nd = -4; nd <= 4 && !nearWound; nd++) {
+                    for (let ne = -4; ne <= 4 && !nearWound; ne++) {
+                        const wx = nx + nd, wy = ny + ne;
+                        if (wx >= 0 && wx < W_GRID && wy >= 0 && wy < W_GRID &&
+                            woundMask[wy * W_GRID + wx]) nearWound = true;
+                    }
+                }
+                if (!nearWound) continue;
+
+                const falloff = Math.exp(-dist2 / (2 * sigma2));
+                if (Math.random() > falloff * 0.8) continue;
+
                 changed = true;
-                // Paint this cell directly on canvas (incremental)
-                const alpha = Math.min(0.55, coverageGrid[idx] * 0.55);
-                const px = (nx / W_GRID) * s;
-                const py = (ny / W_GRID) * s;
-                woundCtx.fillStyle = poly.fiber + alpha + ')';
-                woundCtx.fillRect(px, py, cellPx + 0.5, cellPx + 0.5);
+                const px = woundOff + (nx + 0.5) * cellPx;
+                const py = woundOff + (ny + 0.5) * cellPx;
+                // Multiple overflow strands per skin cell
+                const overflowStrands = 1 + Math.floor(Math.random() * 3);
+                for (let os = 0; os < overflowStrands; os++) {
+                    const fAngle = Math.random() * Math.PI * 2;
+                    const fLen = cellPx * (2 + Math.random() * 6);
+                    const ex = px + Math.cos(fAngle) * fLen;
+                    const ey = py + Math.sin(fAngle) * fLen;
+                    const alpha = 0.08 + falloff * 0.27;
+                    woundCtx.strokeStyle = poly.fiber + alpha + ')';
+                    woundCtx.lineWidth = 0.2 + Math.random() * 0.8;
+                    woundCtx.beginPath();
+                    woundCtx.moveTo(px + (Math.random() - 0.5) * 3, py + (Math.random() - 0.5) * 3);
+                    woundCtx.quadraticCurveTo(
+                        (px + ex) / 2 + (Math.random() - 0.5) * cellPx * 2,
+                        (py + ey) / 2 + (Math.random() - 0.5) * cellPx * 2,
+                        ex, ey
+                    );
+                    woundCtx.stroke();
+                }
             }
         }
     }
@@ -367,7 +487,8 @@ function buildEnvironment() {
 }
 
 // ─── Device (gun shape, aims straight down) ──────────────────────────
-const DEVICE_HEIGHT = 4.5;   // world Y of device above wound
+const DEVICE_HEIGHT_BASE = 3.5;
+function getDeviceHeight() { return DEVICE_HEIGHT_BASE + G.distance * 0.1; }
 const DEVICE_TILT = -Math.PI / 6; // slight tilt (30°) — small enough to stay aligned
 
 function buildDevice() {
@@ -469,144 +590,196 @@ function buildDevice() {
 
     // Initial pose — less tilt so nozzle points closer to directly below
     deviceGroup.rotation.x = DEVICE_TILT;
-    deviceGroup.position.set(0, DEVICE_HEIGHT, 1.5);
+    deviceGroup.position.set(0, getDeviceHeight(), 1.5);
     deviceGroup.castShadow = true;
     scene.add(deviceGroup);
 }
 
 // ─── Wound Surface ──────────────────────────────────────────────────
+const SURFACE_RADIUS = 6.5;  // world radius of the unified surface mesh
+
 function buildWound() {
     woundCanvas = document.createElement('canvas');
-    woundCanvas.width = 512;
-    woundCanvas.height = 512;
+    woundCanvas.width = 1024;
+    woundCanvas.height = 1024;
     woundCtx = woundCanvas.getContext('2d');
     drawWoundTexture();
 
     woundTexture = new THREE.CanvasTexture(woundCanvas);
 
-    // Wound circle
-    const wound = new THREE.Mesh(
-        new THREE.CircleGeometry(WOUND_WORLD, 64),
+    // Single unified surface — wound + skin in one mesh
+    const surface = new THREE.Mesh(
+        new THREE.CircleGeometry(SURFACE_RADIUS, 64),
         new THREE.MeshStandardMaterial({ map: woundTexture, roughness: 0.8, metalness: 0.02 })
     );
-    wound.rotation.x = -Math.PI / 2;
-    wound.position.y = -1.86;
-    wound.receiveShadow = true;
-    scene.add(wound);
+    surface.rotation.x = -Math.PI / 2;
+    surface.position.y = -1.86;
+    surface.receiveShadow = true;
+    scene.add(surface);
 
-    // Skin border
-    const border = new THREE.Mesh(
-        new THREE.RingGeometry(WOUND_WORLD, WOUND_WORLD + 0.7, 48),
-        new THREE.MeshStandardMaterial({ color: 0xd4a088, roughness: 0.75, side: THREE.DoubleSide })
-    );
-    border.rotation.x = -Math.PI / 2;
-    border.position.y = -1.87;
-    scene.add(border);
-
-    // Outer skin
-    const skin = new THREE.Mesh(
-        new THREE.RingGeometry(WOUND_WORLD + 0.7, 7, 48),
-        new THREE.MeshStandardMaterial({ color: 0xecc9ae, roughness: 0.85, side: THREE.DoubleSide })
-    );
-    skin.rotation.x = -Math.PI / 2;
-    skin.position.y = -1.88;
-    skin.receiveShadow = true;
-    scene.add(skin);
-
-    // Sterile drape
+    // Sterile drape (stays separate — different material)
     const drape = new THREE.Mesh(
-        new THREE.RingGeometry(6.5, 8.5, 4),
+        new THREE.RingGeometry(SURFACE_RADIUS - 0.3, 8.5, 4),
         new THREE.MeshStandardMaterial({ color: 0x4a90d9, roughness: 0.7, side: THREE.DoubleSide })
     );
     drape.rotation.x = -Math.PI / 2;
     drape.rotation.z = Math.PI / 4;
-    drape.position.y = -1.9;
+    drape.position.y = -1.87;
     scene.add(drape);
 }
 
 function drawWoundTexture() {
     const c = woundCtx;
-    const s = 512;
+    const s = 1024;
+    const cellPx = s / W_GRID;
+    // The canvas maps to SURFACE_RADIUS (6.5), but wound grid covers WOUND_WORLD (3.5)
+    // wound grid occupies the center portion of the canvas
+    const woundFrac = WOUND_WORLD / SURFACE_RADIUS; // ~0.538
+    const woundPixels = s * woundFrac; // pixels that wound area occupies
+    const woundOffset = (s - woundPixels) / 2; // pixel offset to center wound
 
-    // Background skin
-    const bg = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    bg.addColorStop(0, '#d4a088');
-    bg.addColorStop(1, '#d4a088');
-    c.fillStyle = bg;
+    // 1. Full surface skin base — radial gradient from center to edge
+    const skinGrad = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    skinGrad.addColorStop(0, '#dbb09a'); // light skin center
+    skinGrad.addColorStop(0.45, '#d4a088'); // mid skin (wound border zone)
+    skinGrad.addColorStop(0.6, '#d4a088'); // skin border
+    skinGrad.addColorStop(0.85, '#ecc9ae'); // outer skin
+    skinGrad.addColorStop(1, '#e0be9e'); // edge
+    c.fillStyle = skinGrad;
     c.fillRect(0, 0, s, s);
 
-    // Draw wound shape from mask, using varied wound colors
-    const woundColors = [
-        ['#c06060', '#b55555', '#c47068', '#a04848'],
-        ['#c45555', '#b04050', '#d07060', '#9c4040'],
-        ['#b85858', '#a84848', '#c86858', '#984040'],
-    ][Math.floor(Math.random() * 3)];
+    // 2. Skin pores and texture across entire surface
+    for (let i = 0; i < 2000; i++) {
+        const px = Math.random() * s;
+        const py = Math.random() * s;
+        const dx = px - s / 2, dy = py - s / 2;
+        if (dx * dx + dy * dy > (s / 2) * (s / 2)) continue;
+        c.fillStyle = `rgba(160,120,100,${0.02 + Math.random() * 0.05})`;
+        c.beginPath();
+        c.arc(px, py, 0.5 + Math.random() * 2, 0, Math.PI * 2);
+        c.fill();
+    }
 
+    // 3. Build distance field from wound mask (for soft edges)
+    const distField = new Float32Array(W_GRID * W_GRID);
+    distField.fill(99);
+    for (let i = 0; i < W_GRID * W_GRID; i++) {
+        if (woundMask[i]) distField[i] = 0;
+    }
+    for (let pass = 0; pass < 6; pass++) {
+        for (let y = 1; y < W_GRID - 1; y++) {
+            for (let x = 1; x < W_GRID - 1; x++) {
+                const idx = y * W_GRID + x;
+                const neighbors = [
+                    distField[(y - 1) * W_GRID + x], distField[(y + 1) * W_GRID + x],
+                    distField[y * W_GRID + x - 1], distField[y * W_GRID + x + 1]
+                ];
+                distField[idx] = Math.min(distField[idx], Math.min(...neighbors) + 1);
+            }
+        }
+    }
+
+    // Helper: convert wound grid coords to canvas pixel coords
+    const gridToCanvas = (gx, gy) => ({
+        px: woundOffset + (gx + 0.5) * (woundPixels / W_GRID),
+        py: woundOffset + (gy + 0.5) * (woundPixels / W_GRID),
+    });
+    const gridCellPx = woundPixels / W_GRID;
+
+    // 4. Wound colors
+    const woundColorSets = [
+        ['#c06060', '#b55555', '#c47068', '#a85050'],
+        ['#c45555', '#b04050', '#d07060', '#a04848'],
+        ['#b85858', '#a84848', '#c86858', '#9c4545'],
+    ];
+    const woundColors = woundColorSets[Math.floor(Math.random() * woundColorSets.length)];
+
+    // 5. Pass A: Solid wound base
+    c.fillStyle = woundColors[0];
     for (let gy = 0; gy < W_GRID; gy++) {
         for (let gx = 0; gx < W_GRID; gx++) {
             if (!woundMask[gy * W_GRID + gx]) continue;
-            const px = (gx / W_GRID) * s;
-            const py = (gy / W_GRID) * s;
-            const size = s / W_GRID;
-            c.fillStyle = woundColors[Math.floor(Math.random() * woundColors.length)];
-            c.fillRect(px, py, size + 1, size + 1);
+            const { px, py } = gridToCanvas(gx, gy);
+            c.fillRect(px - gridCellPx / 2 - 0.5, py - gridCellPx / 2 - 0.5, gridCellPx + 1, gridCellPx + 1);
         }
     }
 
-    // Organic texture noise
-    for (let i = 0; i < 3000; i++) {
-        const gx = Math.floor(Math.random() * W_GRID);
-        const gy = Math.floor(Math.random() * W_GRID);
-        if (!woundMask[gy * W_GRID + gx]) continue;
-        const px = (gx / W_GRID) * s + Math.random() * (s / W_GRID);
-        const py = (gy / W_GRID) * s + Math.random() * (s / W_GRID);
-        const br = Math.random() * 30 - 15;
-        c.fillStyle = `rgba(${192 + br | 0},${100 + br * 0.5 | 0},${96 + br * 0.3 | 0},0.4)`;
-        c.beginPath();
-        c.arc(px, py, Math.random() * 3 + 0.5, 0, Math.PI * 2);
-        c.fill();
-    }
-
-    // Moisture highlights inside wound
-    for (let i = 0; i < 150; i++) {
-        const gx = Math.floor(Math.random() * W_GRID);
-        const gy = Math.floor(Math.random() * W_GRID);
-        if (!woundMask[gy * W_GRID + gx]) continue;
-        const px = (gx / W_GRID) * s + Math.random() * (s / W_GRID);
-        const py = (gy / W_GRID) * s + Math.random() * (s / W_GRID);
-        c.fillStyle = `rgba(255,200,180,${Math.random() * 0.12})`;
-        c.beginPath();
-        c.arc(px, py, Math.random() * 5 + 1, 0, Math.PI * 2);
-        c.fill();
-    }
-
-    // Soft wound edges (blur-like by drawing semi-transparent ring around wound cells)
-    for (let gy = 1; gy < W_GRID - 1; gy++) {
-        for (let gx = 1; gx < W_GRID - 1; gx++) {
+    // 6. Pass B: Color variation
+    for (let gy = 0; gy < W_GRID; gy++) {
+        for (let gx = 0; gx < W_GRID; gx++) {
             if (!woundMask[gy * W_GRID + gx]) continue;
-            // Check if edge cell
-            const hasEmpty = !woundMask[(gy - 1) * W_GRID + gx] || !woundMask[(gy + 1) * W_GRID + gx]
-                || !woundMask[gy * W_GRID + gx - 1] || !woundMask[gy * W_GRID + gx + 1];
-            if (!hasEmpty) continue;
-            const px = (gx / W_GRID) * s + (s / W_GRID) / 2;
-            const py = (gy / W_GRID) * s + (s / W_GRID) / 2;
-            c.fillStyle = 'rgba(180,90,80,0.3)';
+            if (Math.random() > 0.5) continue;
+            const { px, py } = gridToCanvas(gx, gy);
+            const color = woundColors[1 + Math.floor(Math.random() * (woundColors.length - 1))];
+            const radius = gridCellPx * (0.6 + Math.random() * 0.5);
+            const g = c.createRadialGradient(px, py, 0, px, py, radius);
+            g.addColorStop(0, color);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            c.fillStyle = g;
             c.beginPath();
-            c.arc(px, py, s / W_GRID, 0, Math.PI * 2);
+            c.arc(px, py, radius, 0, Math.PI * 2);
             c.fill();
         }
+    }
+
+    // 7. Pass C: Soft edge bleed (wound → skin transition)
+    for (let gy = 0; gy < W_GRID; gy++) {
+        for (let gx = 0; gx < W_GRID; gx++) {
+            const dist = distField[gy * W_GRID + gx];
+            if (dist < 1 || dist > 6) continue;
+            const { px, py } = gridToCanvas(gx, gy);
+            const alpha = Math.max(0, 0.5 * (1 - dist / 6.5));
+            if (alpha < 0.02) continue;
+            const color = woundColors[0];
+            const r = parseInt(color.slice(1, 3), 16);
+            const g2 = parseInt(color.slice(3, 5), 16);
+            const b = parseInt(color.slice(5, 7), 16);
+            const radius = gridCellPx * (0.8 + Math.random() * 0.4);
+            c.fillStyle = `rgba(${r},${g2},${b},${alpha})`;
+            c.beginPath();
+            c.arc(px, py, radius, 0, Math.PI * 2);
+            c.fill();
+        }
+    }
+
+    // 8. Organic texture noise within wound
+    for (let i = 0; i < 5000; i++) {
+        const gx = Math.floor(Math.random() * W_GRID);
+        const gy = Math.floor(Math.random() * W_GRID);
+        if (!woundMask[gy * W_GRID + gx]) continue;
+        const { px, py } = gridToCanvas(gx, gy);
+        const ox = (Math.random() - 0.5) * gridCellPx;
+        const oy = (Math.random() - 0.5) * gridCellPx;
+        const br = Math.random() * 40 - 20;
+        c.fillStyle = `rgba(${185 + br | 0},${95 + br * 0.4 | 0},${90 + br * 0.3 | 0},${0.15 + Math.random() * 0.25})`;
+        c.beginPath();
+        c.arc(px + ox, py + oy, 0.5 + Math.random() * 3, 0, Math.PI * 2);
+        c.fill();
+    }
+
+    // 9. Moisture highlights
+    for (let i = 0; i < 300; i++) {
+        const gx = Math.floor(Math.random() * W_GRID);
+        const gy = Math.floor(Math.random() * W_GRID);
+        if (!woundMask[gy * W_GRID + gx]) continue;
+        const { px, py } = gridToCanvas(gx, gy);
+        c.fillStyle = `rgba(255,210,190,${0.03 + Math.random() * 0.08})`;
+        c.beginPath();
+        c.arc(px, py, 1 + Math.random() * 5, 0, Math.PI * 2);
+        c.fill();
     }
 }
 
 function paintFiberOnCanvas(worldX, worldZ) {
-    const cx = ((worldX + WOUND_WORLD) / (WOUND_WORLD * 2)) * 512;
-    const cy = ((worldZ + WOUND_WORLD) / (WOUND_WORLD * 2)) * 512;
-    if (cx < 2 || cx > 510 || cy < 2 || cy > 510) return;
+    const canvasSize = 1024;
+    const cx = ((worldX + SURFACE_RADIUS) / (SURFACE_RADIUS * 2)) * canvasSize;
+    const cy = ((worldZ + SURFACE_RADIUS) / (SURFACE_RADIUS * 2)) * canvasSize;
+    if (cx < 2 || cx > canvasSize - 2 || cy < 2 || cy > canvasSize - 2) return;
 
     const poly = POLYMERS[G.polymer];
     const numStrands = 2 + Math.floor(Math.random() * 4);
     for (let i = 0; i < numStrands; i++) {
-        const len = 4 + Math.random() * 16;
+        const len = 6 + Math.random() * 20;
         const angle = Math.random() * Math.PI * 2;
         const ex = cx + Math.cos(angle) * len;
         const ey = cy + Math.sin(angle) * len;
@@ -678,6 +851,7 @@ function buildParticles() {
 function emitParticles(emitterPos, targetX, targetZ, count) {
     const woundY = -1.86;
     let emitted = 0;
+    const phys = calcSprayPhysics();
     for (let i = 0; i < P_COUNT && emitted < count; i++) {
         if (pActive[i]) continue;
         const i3 = i * 3;
@@ -685,18 +859,18 @@ function emitParticles(emitterPos, targetX, targetZ, count) {
         pPos[i3 + 1] = emitterPos.y + (Math.random() - 0.5) * 0.08;
         pPos[i3 + 2] = emitterPos.z + (Math.random() - 0.5) * 0.08;
 
-        // Velocity aimed at target with some spread
-        const dx = targetX - emitterPos.x + (Math.random() - 0.5) * G.power * 0.3;
+        // Velocity aimed at target with spread based on distance
+        const dx = targetX - emitterPos.x + (Math.random() - 0.5) * phys.particleSpread * 2;
         const dy = woundY - emitterPos.y;
-        const dz = targetZ - emitterPos.z + (Math.random() - 0.5) * G.power * 0.3;
+        const dz = targetZ - emitterPos.z + (Math.random() - 0.5) * phys.particleSpread * 2;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        const speed = 8 + G.power * 2;
+        const speed = phys.particleSpeed;
         pVel[i3] = (dx / dist) * speed;
         pVel[i3 + 1] = (dy / dist) * speed;
         pVel[i3 + 2] = (dz / dist) * speed;
 
         pAlpha[i] = 0.6 + Math.random() * 0.4;
-        pSize[i] = 1.5 + Math.random() * 3;
+        pSize[i] = phys.particleSize + Math.random() * 2;
         pLife[i] = 0;
         pPhase[i] = Math.random() * Math.PI * 2;
         pActive[i] = 1;
@@ -713,7 +887,7 @@ function updateParticles(dt) {
 
         // Spiral
         const phase = pPhase[i] + pLife[i] * 4;
-        const spiral = 0.01 * G.power;
+        const spiral = 0.01 * (G.voltage / 15);
         pPos[i3] += (pVel[i3] + Math.cos(phase) * spiral) * dt;
         pPos[i3 + 1] += pVel[i3 + 1] * dt;
         pPos[i3 + 2] += (pVel[i3 + 2] + Math.sin(phase) * spiral) * dt;
@@ -755,23 +929,36 @@ function addFiber3D(wx, wz) {
         old.geometry.dispose();
         old.material.dispose();
     }
-    const pts = [];
-    const len = 0.15 + Math.random() * 0.5;
+    const phys = calcSprayPhysics();
+    // More control points for smoother curves
+    const controlPts = [];
+    const len = phys.fiberLength + Math.random() * 0.25;
     const angle = Math.random() * Math.PI * 2;
-    for (let s = 0; s <= 4; s++) {
-        const t = s / 4;
-        pts.push(new THREE.Vector3(
-            wx + Math.cos(angle) * len * t + (Math.random() - 0.5) * 0.03,
-            -1.84 + Math.random() * 0.012,
-            wz + Math.sin(angle) * len * t + (Math.random() - 0.5) * 0.03
+    const segments = 6 + Math.floor(Math.random() * 4);
+    // Curviness: thinner fibers whip more
+    const curviness = 0.02 + (400 / Math.max(80, phys.fiberDiameter)) * 0.015;
+    const baseY = -1.84 + fiberGroup.children.length * 0.0002; // slight layer offset
+
+    for (let s = 0; s <= segments; s++) {
+        const t = s / segments;
+        controlPts.push(new THREE.Vector3(
+            wx + Math.cos(angle) * len * t + (Math.random() - 0.5) * curviness * len,
+            baseY + Math.random() * 0.008,
+            wz + Math.sin(angle) * len * t + (Math.random() - 0.5) * curviness * len
         ));
     }
+
+    // Smooth curve through control points
+    const curve = new THREE.CatmullRomCurve3(controlPts);
+    const curvePoints = curve.getPoints(20);
+
     fiberGroup.add(new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.BufferGeometry().setFromPoints(curvePoints),
         new THREE.LineBasicMaterial({
             color: POLYMERS[G.polymer].hex,
             transparent: true,
-            opacity: 0.4 + Math.random() * 0.4,
+            opacity: 0.5 + Math.random() * 0.35,
+            linewidth: 1,
         })
     ));
 }
@@ -866,10 +1053,24 @@ function bindUI() {
         startGame();
     });
 
-    // Power slider
-    document.getElementById('power-slider').addEventListener('input', e => {
-        G.power = parseInt(e.target.value);
-        document.getElementById('power-value').textContent = G.power;
+    // Parameter sliders
+    ['voltage', 'distance', 'flowRate'].forEach(param => {
+        const slider = document.getElementById(`slider-${param}`);
+        const display = document.getElementById(`val-${param}`);
+        if (!slider) return;
+        slider.addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            G[param] = v;
+            if (param === 'flowRate') {
+                display.textContent = v.toFixed(1);
+            } else {
+                display.textContent = v;
+            }
+            // Update derived display
+            const phys = calcSprayPhysics();
+            const fiberEl = document.getElementById('fiber-diameter');
+            if (fiberEl) fiberEl.textContent = Math.round(phys.fiberDiameter) + ' nm';
+        });
     });
 
     // Polymer buttons
@@ -1012,7 +1213,7 @@ function animate() {
     deviceGroup.rotation.z = -mvX * 0.04;
 
     // Float
-    deviceGroup.position.y = DEVICE_HEIGHT + Math.sin(time * 1.5) * 0.06;
+    deviceGroup.position.y = getDeviceHeight() + Math.sin(time * 1.5) * 0.06;
 
     // ── Spray logic (directly at aim point) ──
     const emitter = deviceGroup.getObjectByName('emitter');
@@ -1037,16 +1238,16 @@ function animate() {
         }
         if (trigger) trigger.position.z = -0.08;
 
-        // ★ Direct coverage at aim point — world-space radius, Gaussian falloff
-        const sprayRadius = 0.3 + G.power * 0.15;  // world units (0.45 – 1.05)
-        sprayAtAim(G.aimX, G.aimZ, sprayRadius, dt);
+        // ★ Direct coverage at aim point — physics-derived radius
+        const phys = calcSprayPhysics();
+        sprayAtAim(G.aimX, G.aimZ, phys.sprayRadius, dt);
 
         // Emit visual particles from device toward aim point
         const emitWorldPos = new THREE.Vector3();
         if (emitter) emitter.getWorldPosition(emitWorldPos);
-        else emitWorldPos.set(deviceGroup.position.x, DEVICE_HEIGHT - 1, deviceGroup.position.z);
+        else emitWorldPos.set(deviceGroup.position.x, getDeviceHeight() - 1, deviceGroup.position.z);
 
-        const emitCount = Math.floor(G.power * 12 * dt * 60);
+        const emitCount = Math.floor(phys.emissionRate * dt * 60);
         emitParticles(emitWorldPos, G.aimX, G.aimZ, emitCount);
 
         // CSS particles

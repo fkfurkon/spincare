@@ -96,11 +96,36 @@
                 </button>
             </div>
 
-            <!-- Power Slider -->
-            <div class="hud-power">
-                <span class="power-label">POWER</span>
-                <input type="range" id="power-slider" class="power-range" min="1" max="5" value="3" step="1">
-                <span class="power-value" id="power-value">3</span>
+            <!-- Electrospinning Parameters -->
+            <div class="hud-params">
+                <div class="param-row">
+                    <label class="param-label">
+                        <span class="param-icon">⚡</span>
+                        <span class="param-name">Voltage</span>
+                    </label>
+                    <input type="range" id="slider-voltage" class="param-range voltage" min="5" max="25" value="15" step="1">
+                    <span class="param-value"><span id="val-voltage">15</span> kV</span>
+                </div>
+                <div class="param-row">
+                    <label class="param-label">
+                        <span class="param-icon">📏</span>
+                        <span class="param-name">Distance</span>
+                    </label>
+                    <input type="range" id="slider-distance" class="param-range distance" min="5" max="20" value="10" step="1">
+                    <span class="param-value"><span id="val-distance">10</span> cm</span>
+                </div>
+                <div class="param-row">
+                    <label class="param-label">
+                        <span class="param-icon">💧</span>
+                        <span class="param-name">Flow Rate</span>
+                    </label>
+                    <input type="range" id="slider-flowRate" class="param-range flowrate" min="0.5" max="5" value="2.0" step="0.5">
+                    <span class="param-value"><span id="val-flowRate">2.0</span> mL/h</span>
+                </div>
+                <div class="param-derived">
+                    <span class="derived-label">Fiber Ø</span>
+                    <span class="derived-value" id="fiber-diameter">320 nm</span>
+                </div>
             </div>
 
             <!-- Timer -->
@@ -147,9 +172,16 @@
             <button id="close-modal" class="close-btn">✕</button>
             <h2>How SpinCare Works</h2>
             <p>SpinCare is a real medical device that uses <strong>electrospinning</strong> to create nanofiber wound dressings. A high-voltage electric field stretches a polymer solution into ultra-fine fibers (50-500nm) that land on the wound, forming a breathable protective layer.</p>
-            <h3>In This Simulation</h3>
-            <p>Move your mouse to aim the device. Hold click to spray nanofibers onto the wound. Cover 100% to complete the dressing!</p>
-            <p><strong>Power slider:</strong> Higher power = wider spray but less precision.<br><strong>Polymer:</strong> Changes the fiber color and properties.</p>
+            <h3>Parameters</h3>
+            <p><strong>⚡ Voltage (kV):</strong> Controls electric field strength. Higher voltage produces thinner fibers and wider spray.<br>
+            <strong>📏 Distance (cm):</strong> Gap between nozzle and wound. Greater distance = wider spray area but less dense coverage.<br>
+            <strong>💧 Flow Rate (mL/h):</strong> Polymer solution delivery rate. Higher flow = faster coverage but thicker fibers.<br>
+            <strong>Fiber Ø:</strong> Estimated fiber diameter in nanometers — derived from voltage and flow rate.</p>
+            <h3>Polymer Types</h3>
+            <p><strong>PCL:</strong> Biodegradable, slow-absorbing (months).<br>
+            <strong>PVA:</strong> Water-soluble, fast-absorbing.<br>
+            <strong>PLGA:</strong> Controlled-release drug carrier.<br>
+            <strong>Chitosan:</strong> Antimicrobial, from shellfish.</p>
         </div>
     </div>
 

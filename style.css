@@ -199,7 +199,7 @@ body {
 /* Only interactive elements should capture clicks — NOT entire panels */
 .hud-btn,
 .hud-poly,
-.power-range,
+.param-range,
 .play-btn,
 .close-btn {
     pointer-events: auto;
@@ -330,9 +330,9 @@ body {
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: 12px;
-    padding: 8px 16px;
+    padding: 10px 16px;
     background: var(--panel-bg);
     backdrop-filter: blur(10px);
     border: 1px solid var(--border);
@@ -379,23 +379,44 @@ body {
     border-radius: 50%;
 }
 
-/* Power Slider */
-.hud-power {
+/* ===== Electrospinning Parameter Panel ===== */
+.hud-params {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+    min-width: 220px;
+}
+
+.param-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 12px;
-    border-left: 1px solid var(--border);
 }
 
-.power-label {
+.param-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 84px;
+}
+
+.param-icon {
+    font-size: 12px;
+    width: 18px;
+    text-align: center;
+}
+
+.param-name {
     font-size: 10px;
     font-weight: 700;
     color: var(--text-muted);
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
 }
 
-.power-range {
+.param-range {
     -webkit-appearance: none;
     appearance: none;
     width: 80px;
@@ -406,28 +427,80 @@ body {
     cursor: pointer;
 }
 
-.power-range::-webkit-slider-thumb {
+.param-range::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--white);
     border: 2px solid var(--teal);
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    transition: border-color 0.2s;
 }
 
-.power-range::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+.param-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
     background: var(--white);
     border: 2px solid var(--teal);
 }
 
-.power-value {
+/* Color-coded slider accents */
+.param-range.voltage::-webkit-slider-thumb {
+    border-color: #eab308;
+}
+
+.param-range.voltage::-moz-range-thumb {
+    border-color: #eab308;
+}
+
+.param-range.distance::-webkit-slider-thumb {
+    border-color: #3b82f6;
+}
+
+.param-range.distance::-moz-range-thumb {
+    border-color: #3b82f6;
+}
+
+.param-range.flowrate::-webkit-slider-thumb {
+    border-color: #10b981;
+}
+
+.param-range.flowrate::-moz-range-thumb {
+    border-color: #10b981;
+}
+
+.param-value {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    min-width: 48px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.param-derived {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 4px;
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.derived-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.derived-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
     font-weight: 700;
     color: var(--teal);
 }
@@ -700,9 +773,10 @@ body {
         justify-content: center;
     }
 
-    .hud-power {
+    .hud-params {
         border-left: none;
         padding-left: 0;
+        min-width: 180px;
     }
 
     .hud-timer {
